@@ -47,9 +47,10 @@ comparables:
     at hours 18-24): a huge hour 1 means most of the world is already in,
     so there is less headroom. Hours 18-24 therefore use a linear
     regression of the log-ratio on log(hour-1 print) instead of the plain
-    median, its slope shrunk by 0.7, and log(hour 1) clamped to the
-    training range so a record-breaking hour 1 cannot extrapolate the line
-    below a sensible ramp. Hours 15-17 blend the plain and the conditioned
+    median, its slope shrunk by 0.7, and log(hour 1) soft-clamped to a
+    log-unit past the training range, so a record-breaking hour 1
+    extrapolates the line a little instead of holding at the biggest
+    launch's ramp. Hours 15-17 blend the plain and the conditioned
     estimate so the shape has no step. The spread there is the regression's
     residual standard deviation.
   * The spread is floored at 0.15 and capped at 0.60 log units.
@@ -231,7 +232,14 @@ def conditioned(train: list[list[float]], h: int, p1: float) -> tuple[float, flo
     cov = sum((x - mx) * (y - my) for x, y in zip(xs, lr))
     slope = (cov / vx if vx > 0 else 0.0) * SLOPE_SHRINK
     lx = math.log(max(1.0, p1))
-    lx = min(max(lx, min(xs)), max(xs))
+    # Soft clamp: allow a log-unit past the training range. The ramp-vs-size
+    # relation is real (corr -0.6..-0.8 at hours 18-24), and a record hour 1
+    # is flatter than the biggest launch seen: a hard clamp holds TLOU2
+    # (the largest hour 1) at the next launch's ramp and over-predicts it,
+    # and would do the same to GTA VI, whose hour 1 will be a record. The
+    # slope is already shrunk, so this is a damped extrapolation, not a
+    # free one; the spread still covers the extra uncertainty.
+    lx = min(max(lx, min(xs) - 1.0), max(xs) + 1.0)
     pred = my + slope * (lx - mx)
     resid = [y - (my + slope * (x - mx)) for x, y in zip(xs, lr)]
     var = sum(r * r for r in resid) / max(1, len(resid) - 1)
